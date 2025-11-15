@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Real-Time WebSocket Updates</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+
+        /* Custom scrollbar for log area */
+        #log-area::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        #log-area::-webkit-scrollbar-thumb {
+            background-color: #3b82f6;
+            border-radius: 3px;
+        }
+
+        #log-area::-webkit-scrollbar-track {
+            background-color: #f1f5f9;
+        }
+    </style>
+</head>
+
+<body class="bg-gray-50 min-h-screen p-4 sm:p-8">
+
+    <div class="max-w-4xl mx-auto">
+        <!-- Header -->
+        <h1 class="text-3xl sm:text-4xl font-extrabold text-gray-900 mb-2">Real-Time Data Feed</h1>
+        <p class="text-lg text-gray-500 mb-8">WebSocket Client Simulation (No real external server required).</p>
+
+        <!-- Status Card -->
+        <div class="bg-white p-6 rounded-xl shadow-lg mb-8 border border-blue-200">
+            <h2 class="text-xl font-semibold mb-3 text-blue-700">Connection Status</h2>
+            <div id="status" class="text-sm font-medium">
+                <span class="inline-block px-3 py-1 rounded-full bg-yellow-100 text-yellow-800">Connecting...</span>
+            </div>
+            <p class="text-sm text-gray-500 mt-2">Updates received directly from the mock server every ~2 seconds.</p>
+        </div>
+
+        <!-- Real-Time Data Grid -->
+        <div class="grid md:grid-cols-2 gap-6 mb-8">
+            <!-- Metric 1 -->
+            <div class="bg-white p-6 rounded-xl shadow-lg border-l-4 border-green-500">
+                <p class="text-sm font-medium text-gray-500">Server Load (CPU)</p>
+                <p id="metric-cpu" class="text-3xl font-bold text-gray-900 mt-1">-- %</p>
+                <div class="text-xs text-green-600 mt-1 flex items-center">
+                    <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"
+                        xmlns="http://www.w3.org/2000/svg">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                            d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"></path>
+                    </svg>
+                    <span id="cpu-trend">Stable</span>
+                </div>
+            </div>
+
+            <!-- Metric 2 -->
+            <div class="bg-white p-6 rounded-xl shadow-lg border-l-4 border-indigo-500">
+                <p class="text-sm font-medium text-gray-500">Active Users</p>
+                <p id="metric-users" class="text-3xl font-bold text-gray-900 mt-1">---</p>
+                <div class="text-xs text-indigo-600 mt-1 flex items-center">
+                    <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"
+                        xmlns="http://www.w3.org/2000/svg">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                            d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0zm0 0v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z">
+                        </path>
+                    </svg>
+                    <span id="users-trend">Stable</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Log Area -->
+        <div class="bg-white p-6 rounded-xl shadow-lg">
+            <h2 class="text-xl font-semibold mb-3 text-gray-700">WebSocket Message Log</h2>
+            <div id="log-area"
+                class="h-64 overflow-y-scroll p-3 bg-gray-100 rounded-lg text-sm space-y-2 border border-gray-300">
+                <p class="text-gray-500">Awaiting data...</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_KEY = ""; // Placeholder, not used for the mock server
+
+        // --- Mock WebSocket Server Implementation (Runs in the browser) ---
+        // Simulates a server pushing data every 2 seconds
+        function startMockWebSocketServer(onReceive) {
+            console.log("Mock Server: Starting push service...");
+            let cpu = 50.0;
+            let users = 100;
+            let intervalId;
+
+            // Simple function to simulate realistic fluctuations
+            const fluctuate = (value, maxChange) => {
+                const change = (Math.random() - 0.5) * maxChange;
+                return Math.max(0, Math.min(100, value + change));
+            };
+
+            // Initial connection simulation delay
+            setTimeout(() => {
+                onReceive({ event: 'open' });
+
+                intervalId = setInterval(() => {
+                    // 1. Update metric values
+                    cpu = fluctuate(cpu, 3);
+                    users = Math.floor(fluctuate(users, 5));
+
+                    // 2. Format the payload (JSON is standard for WebSockets)
+                    const payload = {
+                        type: 'realtime_metrics',
+                        timestamp: new Date().toLocaleTimeString(),
+                        data: {
+                            cpu_load: parseFloat(cpu.toFixed(2)),
+                            active_users: users
+                        }
+                    };
+
+                    // 3. Send the payload to the client handler
+                    onReceive({ event: 'message', data: JSON.stringify(payload) });
+
+                }, 2000); // Push update every 2 seconds
+
+            }, 1000); // Initial connection delay
+
+            return () => {
+                clearInterval(intervalId);
+                onReceive({ event: 'close' });
+                console.log("Mock Server: Push service stopped.");
+            };
+        }
+
+        // --- WebSocket Client Logic ---
+        document.addEventListener('DOMContentLoaded', () => {
+            const statusElement = document.getElementById('status');
+            const logArea = document.getElementById('log-area');
+            const metricCpu = document.getElementById('metric-cpu');
+            const metricUsers = document.getElementById('metric-users');
+            const cpuTrend = document.getElementById('cpu-trend');
+            const usersTrend = document.getElementById('users-trend');
+
+            let lastCpu = 50.0;
+            let lastUsers = 100;
+            let stopServer;
+
+            // Helper to update the status indicator UI
+            const updateStatus = (state, message) => {
+                let colorClass;
+                if (state === 'open') {
+                    colorClass = 'bg-green-100 text-green-800';
+                } else if (state === 'close') {
+                    colorClass = 'bg-red-100 text-red-800';
+                } else {
+                    colorClass = 'bg-yellow-100 text-yellow-800';
+                }
+                statusElement.innerHTML = `<span class="inline-block px-3 py-1 rounded-full ${colorClass}">${message}</span>`;
+            };
+
+            // Helper to add a log entry
+            const logMessage = (source, content) => {
+                const now = new Date().toLocaleTimeString();
+                const p = document.createElement('p');
+                p.className = 'text-gray-800 border-b border-gray-200 pb-1';
+                p.innerHTML = `<span class="font-mono text-gray-500 mr-2">[${now}]</span> <strong>${source}:</strong> ${content}`;
+
+                // Clear initial awaiting message if present
+                if (logArea.querySelector('.text-gray-500')) {
+                    logArea.innerHTML = '';
+                }
+                logArea.prepend(p);
+                // Maintain scroll at the top (for newest messages)
+            };
+
+            // Main handler for all server events (open, message, close, error)
+            const handleServerEvent = (event) => {
+                switch (event.event) {
+                    case 'open':
+                        updateStatus('open', 'CONNECTED');
+                        logMessage('System', 'Successfully connected to mock WebSocket server.');
+                        break;
+
+                    case 'message':
+                        try {
+                            const data = JSON.parse(event.data);
+                            if (data.type === 'realtime_metrics') {
+                                processRealTimeMetrics(data.data);
+                            }
+                            logMessage('Data Received', `Type: ${data.type} | CPU: ${data.data.cpu_load}%`);
+
+                        } catch (e) {
+                            console.error("Error parsing message:", e);
+                            logMessage('Error', 'Invalid JSON payload received.');
+                        }
+                        break;
+
+                    case 'close':
+                        updateStatus('close', 'DISCONNECTED');
+                        logMessage('System', 'Connection closed.');
+                        break;
+
+                    case 'error':
+                        updateStatus('close', 'ERROR');
+                        logMessage('System', `An error occurred: ${event.data}`);
+                        break;
+                }
+            };
+
+            // Logic to update UI metrics and show trends
+            const processRealTimeMetrics = (metrics) => {
+                const cpu = metrics.cpu_load;
+                const users = metrics.active_users;
+
+                // --- CPU Update ---
+                metricCpu.textContent = `${cpu.toFixed(2)} %`;
+                if (cpu > lastCpu) {
+                    cpuTrend.textContent = 'Rising';
+                    cpuTrend.className = 'text-xs text-red-600 mt-1 flex items-center';
+                } else if (cpu < lastCpu) {
+                    cpuTrend.textContent = 'Falling';
+                    cpuTrend.className = 'text-xs text-green-600 mt-1 flex items-center';
+                } else {
+                    cpuTrend.textContent = 'Stable';
+                    cpuTrend.className = 'text-xs text-gray-600 mt-1 flex items-center';
+                }
+                lastCpu = cpu;
+
+                // --- Users Update ---
+                metricUsers.textContent = users.toLocaleString();
+                if (users > lastUsers) {
+                    usersTrend.textContent = 'Increasing';
+                    usersTrend.className = 'text-xs text-red-600 mt-1 flex items-center';
+                } else if (users < lastUsers) {
+                    usersTrend.textContent = 'Decreasing';
+                    usersTrend.className = 'text-xs text-green-600 mt-1 flex items-center';
+                } else {
+                    usersTrend.textContent = 'Stable';
+                    usersTrend.className = 'text-xs text-gray-600 mt-1 flex items-center';
+                }
+                lastUsers = users;
+            };
+
+            // Start the mock server
+            stopServer = startMockWebSocketServer(handleServerEvent);
+
+            // Stop the mock server when the window closes
+            window.addEventListener('beforeunload', stopServer);
+        });
+
+    </script>
+</body>
+
+</html>
